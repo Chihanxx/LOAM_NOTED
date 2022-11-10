@@ -129,6 +129,8 @@ float imuVeloFromStartX = 0, imuVeloFromStartY = 0, imuVeloFromStartZ = 0;
 *****************************************************************************/
 
 //当前点云中的点相对第一个点去除因匀速运动产生的畸变，效果相当于得到在点云扫描开始位置静止扫描得到的点云
+
+//对各个点进行补偿，注意要先平移再旋转，而且这里是从当前帧变换到上一帧，旋转矩阵是求个逆的。具体代码如下。
 void TransformToStart(PointType const * const pi, PointType * const po)
 {
   //插值系数计算，云中每个点的相对时间/点云周期10
@@ -332,6 +334,7 @@ void laserCloudSharpHandler(const sensor_msgs::PointCloud2ConstPtr& cornerPoints
   cornerPointsSharp->clear();
   pcl::fromROSMsg(*cornerPointsSharp2, *cornerPointsSharp);
   std::vector<int> indices;
+  //去除无效点
   pcl::removeNaNFromPointCloud(*cornerPointsSharp,*cornerPointsSharp, indices);
   newCornerPointsSharp = true;
 }
@@ -545,30 +548,35 @@ int main(int argc, char** argv)
               std::vector<int> indices;
               pcl::removeNaNFromPointCloud(*laserCloudCornerLast,*laserCloudCornerLast, indices);
               //kd-tree查找一个最近距离点，边沿点未经过体素栅格滤波，一般边沿点本来就比较少，不做滤波
-              kdtreeCornerLast->nearestKSearch(pointSel, 1, pointSearchInd, pointSearchSqDis);
+
+              //nearestKSearch()函数  参数1：目标点  参数2：int k 搜索离point最近的k个点
+              //参数3：搜索到的点在数据源中的下标  参数4：到被搜索点的距离（平方距离），与下标相对应
+              //return    搜索到的点的个数（int）
+              kdtreeCornerLast->nearestKSearch(pointSel, 1, pointSearchInd, pointSearchSqDis);//在上一帧点云（装在kd树里）kdtreeCornerLast中搜索与当前点pointSel最近的 1 个点    
+              
               int closestPointInd = -1, minPointInd2 = -1;
 
               //寻找相邻线距离目标点距离最小的点
               //再次提醒：velodyne是2度一线，scanID相邻并不代表线号相邻，相邻线度数相差2度，也即线号scanID相差2
               if (pointSearchSqDis[0] < 25) {//找到的最近点距离的确很近的话
-                closestPointInd = pointSearchInd[0];
+                closestPointInd = pointSearchInd[0];//上一帧中最近点的序号（0-40000）
                 //提取最近点线号
-                int closestPointScan = int(laserCloudCornerLast->points[closestPointInd].intensity);
+                int closestPointScan = int(laserCloudCornerLast->points[closestPointInd].intensity);//上一帧最近点所在的线号
 
                 float pointSqDis, minPointSqDis2 = 25;//初始门槛值5米，可大致过滤掉scanID相邻，但实际线不相邻的值
                 //寻找距离目标点最近距离的平方和最小的点
                 for (int j = closestPointInd + 1; j < cornerPointsSharpNum; j++) {//向scanID增大的方向查找
                   if (int(laserCloudCornerLast->points[j].intensity) > closestPointScan + 2.5) {//非相邻线
-                    break;
-                  }
-
-                  pointSqDis = (laserCloudCornerLast->points[j].x - pointSel.x) * 
-                               (laserCloudCornerLast->points[j].x - pointSel.x) + 
-                               (laserCloudCornerLast->points[j].y - pointSel.y) * 
-                               (laserCloudCornerLast->points[j].y - pointSel.y) + 
-                               (laserCloudCornerLast->points[j].z - pointSel.z) * 
-                               (laserCloudCornerLast->points[j].z - pointSel.z);
-
+                    break;                                                                       //
+                  }                                                                               //可以看出
+                                                                                                  //这两个if是
+                  pointSqDis = (laserCloudCornerLast->points[j].x - pointSel.x) *                 //要保证
+                               (laserCloudCornerLast->points[j].x - pointSel.x) +                 //寻找的这个最近点的相邻点 所在 的线号
+                               (laserCloudCornerLast->points[j].y - pointSel.y) *                 //只能位于
+                               (laserCloudCornerLast->points[j].y - pointSel.y) +                 //最近点 所在的线号
+                               (laserCloudCornerLast->points[j].z - pointSel.z) *                 //的 大一号的线  上
+                               (laserCloudCornerLast->points[j].z - pointSel.z);                  //
+                                                                                                  //
                   if (int(laserCloudCornerLast->points[j].intensity) > closestPointScan) {//确保两个点不在同一条scan上（相邻线查找应该可以用scanID == closestPointScan +/- 1 来做）
                     if (pointSqDis < minPointSqDis2) {//距离更近，要小于初始值5米
                         //更新最小距离与点序
@@ -580,18 +588,18 @@ int main(int argc, char** argv)
 
                 //同理
                 for (int j = closestPointInd - 1; j >= 0; j--) {//向scanID减小的方向查找
-                  if (int(laserCloudCornerLast->points[j].intensity) < closestPointScan - 2.5) {
-                    break;
-                  }
-
-                  pointSqDis = (laserCloudCornerLast->points[j].x - pointSel.x) * 
-                               (laserCloudCornerLast->points[j].x - pointSel.x) + 
-                               (laserCloudCornerLast->points[j].y - pointSel.y) * 
-                               (laserCloudCornerLast->points[j].y - pointSel.y) + 
-                               (laserCloudCornerLast->points[j].z - pointSel.z) * 
-                               (laserCloudCornerLast->points[j].z - pointSel.z);
-
-                  if (int(laserCloudCornerLast->points[j].intensity) < closestPointScan) {
+                  if (int(laserCloudCornerLast->points[j].intensity) < closestPointScan - 2.5) {//非相邻线
+                    break;                                                                      //
+                  }                                                                             //可以看出
+                                                                                                //这两个if是
+                  pointSqDis = (laserCloudCornerLast->points[j].x - pointSel.x) *               //要保证
+                               (laserCloudCornerLast->points[j].x - pointSel.x) +               //寻找的这个最近点的相邻点 所在 的线号
+                               (laserCloudCornerLast->points[j].y - pointSel.y) *               //只能位于
+                               (laserCloudCornerLast->points[j].y - pointSel.y) +               //最近点所在的线号
+                               (laserCloudCornerLast->points[j].z - pointSel.z) *               //的 小一号的线   上
+                               (laserCloudCornerLast->points[j].z - pointSel.z);                //
+                                                                                                //
+                  if (int(laserCloudCornerLast->points[j].intensity) < closestPointScan) {      //
                     if (pointSqDis < minPointSqDis2) {
                       minPointSqDis2 = pointSqDis;
                       minPointInd2 = j;
@@ -683,15 +691,16 @@ int main(int argc, char** argv)
 
             if (iterCount % 5 == 0) {
                 //kd-tree最近点查找，在经过体素栅格滤波之后的平面点中查找，一般平面点太多，滤波后最近点查找数据量小
-              kdtreeSurfLast->nearestKSearch(pointSel, 1, pointSearchInd, pointSearchSqDis);
+              kdtreeSurfLast->nearestKSearch(pointSel, 1, pointSearchInd, pointSearchSqDis);//pointSearchInd:在上一帧点云（存在kd树中）中找到了一个与当前点pointSel距离最近的点的下标
+              //再重复一遍：pointSearchInd是  上一帧   的 最近点的序号
               int closestPointInd = -1, minPointInd2 = -1, minPointInd3 = -1;
               if (pointSearchSqDis[0] < 25) {
                 closestPointInd = pointSearchInd[0];
-                int closestPointScan = int(laserCloudSurfLast->points[closestPointInd].intensity);
+                int closestPointScan = int(laserCloudSurfLast->points[closestPointInd].intensity);//上一帧中最近点所在的雷达线号
 
                 float pointSqDis, minPointSqDis2 = 25, minPointSqDis3 = 25;
-                for (int j = closestPointInd + 1; j < surfPointsFlatNum; j++) {
-                  if (int(laserCloudSurfLast->points[j].intensity) > closestPointScan + 2.5) {
+                for (int j = closestPointInd + 1; j < surfPointsFlatNum; j++) {//往线号增大的方向找
+                  if (int(laserCloudSurfLast->points[j].intensity) > closestPointScan + 2.5) {//超过这个数字就已经不是相邻线
                     break;
                   }
 
@@ -702,12 +711,12 @@ int main(int argc, char** argv)
                                (laserCloudSurfLast->points[j].z - pointSel.z) * 
                                (laserCloudSurfLast->points[j].z - pointSel.z);
 
-                  if (int(laserCloudSurfLast->points[j].intensity) <= closestPointScan) {//如果点的线号小于等于最近点的线号(应该最多取等，也即同一线上的点)
+                  if (int(laserCloudSurfLast->points[j].intensity) <= closestPointScan) {//如果点的线号小于等于最近点的线号  (小李也认为  应该最多取等，也即同一线上的点)
                      if (pointSqDis < minPointSqDis2) {
                        minPointSqDis2 = pointSqDis;
                        minPointInd2 = j;
                      }
-                  } else {//如果点处在大于该线上
+                  } else {//如果点处在大于该线上，也即大一号的线上
                      if (pointSqDis < minPointSqDis3) {
                        minPointSqDis3 = pointSqDis;
                        minPointInd3 = j;
@@ -717,8 +726,8 @@ int main(int argc, char** argv)
 
 
                 //同理
-                for (int j = closestPointInd - 1; j >= 0; j--) {
-                  if (int(laserCloudSurfLast->points[j].intensity) < closestPointScan - 2.5) {
+                for (int j = closestPointInd - 1; j >= 0; j--) {//往线号减小的方向找
+                  if (int(laserCloudSurfLast->points[j].intensity) < closestPointScan - 2.5) {//超过这个数字就已经不是相邻线
                     break;
                   }
 
@@ -729,12 +738,12 @@ int main(int argc, char** argv)
                                (laserCloudSurfLast->points[j].z - pointSel.z) * 
                                (laserCloudSurfLast->points[j].z - pointSel.z);
 
-                  if (int(laserCloudSurfLast->points[j].intensity) >= closestPointScan) {
+                  if (int(laserCloudSurfLast->points[j].intensity) >= closestPointScan) {//如果点的线号大于等于最近点的线号  (小李也认为 应该最多取等，也即同一线上的点)
                     if (pointSqDis < minPointSqDis2) {
                       minPointSqDis2 = pointSqDis;
                       minPointInd2 = j;
                     }
-                  } else {
+                  } else {//如果点处在小于该线上，也即小一号的线上
                     if (pointSqDis < minPointSqDis3) {
                       minPointSqDis3 = pointSqDis;
                       minPointInd3 = j;
@@ -743,9 +752,9 @@ int main(int argc, char** argv)
                 }
               }
 
-              pointSearchSurfInd1[i] = closestPointInd;//kd-tree最近距离点,-1表示未找到满足要求的点
-              pointSearchSurfInd2[i] = minPointInd2;//同一线号上的距离最近的点，-1表示未找到满足要求的点
-              pointSearchSurfInd3[i] = minPointInd3;//不同线号上的距离最近的点，-1表示未找到满足要求的点
+              pointSearchSurfInd1[i] = closestPointInd;//kd-tree最近距离点,-1表示未找到满足要求的点            上一帧的最近点的序号
+              pointSearchSurfInd2[i] = minPointInd2;//同一线号上的距离最近的点，-1表示未找到满足要求的点        上一帧的最近点的同一线号上的点的序号
+              pointSearchSurfInd3[i] = minPointInd3;//不同线号上的距离最近的点，-1表示未找到满足要求的点        上一帧的最近点的不同线号上的点的序号
             }
 
             if (pointSearchSurfInd2[i] >= 0 && pointSearchSurfInd3[i] >= 0) {//找到了三个点
