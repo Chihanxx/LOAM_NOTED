@@ -79,7 +79,7 @@ float cloudCurvature[40000];
 int cloudSortInd[40000];
 //点是否筛选过标志：0-未筛选过，1-筛选过
 int cloudNeighborPicked[40000];
-//点分类标号:2-代表曲率很大，1-代表曲率比较大,-1-代表曲率很小，0-曲率比较小(其中1包含了2,0包含了1,0和1构成了点云全部的点)
+//点分类标号:2-代表曲率很大，1-代表曲率比较大,-1-代表曲率很小，0-曲率比较小(其中1包含了2, 0包含了1, 0和1构成了点云全部的点)
 int cloudLabel[40000];
 
 //imu时间戳大于当前点云时间戳的位置
@@ -769,7 +769,7 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr& laserCloudMsg)
 }
 
 //接收imu消息，imu坐标系为x轴向前，y轴向右，z轴向上的右手坐标系
-void imuHandler(const sensor_msgs::Imu::ConstPtr& imuIn)
+void imuHandler(const sensor_msgs::Imu::ConstPtr& imuIn)//处理IMU数据。虽然LOAM本身不用IMU也能跑，但是用了精度肯定会更好。ALOAM版本中为了简单就没有使用IMU
 {
   double roll, pitch, yaw;
   tf::Quaternion orientation;
