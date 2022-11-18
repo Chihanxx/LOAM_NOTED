@@ -29,7 +29,10 @@
 // This is an implementation of the algorithm described in the following paper:
 //   J. Zhang and S. Singh. LOAM: Lidar Odometry and Mapping in Real-time.
 //     Robotics: Science and Systems Conference (RSS). Berkeley, CA, July 2014.
-
+/*
+这一部主要是将Lidar Odometry中得到的姿态信息和Lidar Mapping中得到的信息全部都放入到rviz中，方便观看和处理。
+如果是为了使用LOAM作为前端的话，到Lidar Mapping就完全够用了。
+*/
 #include <cmath>
 
 #include <loam_velodyne/common.h>
@@ -156,11 +159,12 @@ void transformAssociateToMap()
 //接收laserOdometry的信息
 void laserOdometryHandler(const nav_msgs::Odometry::ConstPtr& laserOdometry)
 {
+  // 1.对收到的消息进行解析，得到roll,pitch,yaw
   double roll, pitch, yaw;
   geometry_msgs::Quaternion geoQuat = laserOdometry->pose.pose.orientation;
   tf::Matrix3x3(tf::Quaternion(geoQuat.z, -geoQuat.x, -geoQuat.y, geoQuat.w)).getRPY(roll, pitch, yaw);
 
-  //得到旋转平移矩阵
+  //2.得到旋转平移矩阵transformSum
   transformSum[0] = -pitch;
   transformSum[1] = -yaw;
   transformSum[2] = roll;
@@ -169,11 +173,13 @@ void laserOdometryHandler(const nav_msgs::Odometry::ConstPtr& laserOdometry)
   transformSum[4] = laserOdometry->pose.pose.position.y;
   transformSum[5] = laserOdometry->pose.pose.position.z;
 
+  // 3.将Lidar里程计估计的位姿转换到世界坐标系下transformMapped
   transformAssociateToMap();
-
+  // Lidar在世界坐标系下的位姿geoQuat
   geoQuat = tf::createQuaternionMsgFromRollPitchYaw
             (transformMapped[2], -transformMapped[0], -transformMapped[1]);
-
+            
+  // 4.pubLaserOdometry2Pointer节点发布Lidar在世界坐标系下的位姿
   laserOdometry2.header.stamp = laserOdometry->header.stamp;
   laserOdometry2.pose.pose.orientation.x = -geoQuat.y;
   laserOdometry2.pose.pose.orientation.y = -geoQuat.z;
@@ -184,7 +190,7 @@ void laserOdometryHandler(const nav_msgs::Odometry::ConstPtr& laserOdometry)
   laserOdometry2.pose.pose.position.z = transformMapped[5];
   pubLaserOdometry2Pointer->publish(laserOdometry2);
 
-  //发送旋转平移量
+  // 5.tfBroadcaster2Pointer节点发送旋转平移量
   laserOdometryTrans2.stamp_ = laserOdometry->header.stamp;
   laserOdometryTrans2.setRotation(tf::Quaternion(-geoQuat.y, -geoQuat.z, geoQuat.x, geoQuat.w));
   laserOdometryTrans2.setOrigin(tf::Vector3(transformMapped[3], transformMapped[4], transformMapped[5]));
@@ -194,10 +200,11 @@ void laserOdometryHandler(const nav_msgs::Odometry::ConstPtr& laserOdometry)
 //接收laserMapping的转换信息
 void odomAftMappedHandler(const nav_msgs::Odometry::ConstPtr& odomAftMapped)
 {
+  // 1.对收到的消息进行解析，得到roll,pitch,yaw
   double roll, pitch, yaw;
   geometry_msgs::Quaternion geoQuat = odomAftMapped->pose.pose.orientation;
   tf::Matrix3x3(tf::Quaternion(geoQuat.z, -geoQuat.x, -geoQuat.y, geoQuat.w)).getRPY(roll, pitch, yaw);
-
+  // 2.transformAftMapped
   transformAftMapped[0] = -pitch;
   transformAftMapped[1] = -yaw;
   transformAftMapped[2] = roll;
@@ -205,7 +212,7 @@ void odomAftMappedHandler(const nav_msgs::Odometry::ConstPtr& odomAftMapped)
   transformAftMapped[3] = odomAftMapped->pose.pose.position.x;
   transformAftMapped[4] = odomAftMapped->pose.pose.position.y;
   transformAftMapped[5] = odomAftMapped->pose.pose.position.z;
-
+  // 3.transformBefMapped
   transformBefMapped[0] = odomAftMapped->twist.twist.angular.x;
   transformBefMapped[1] = odomAftMapped->twist.twist.angular.y;
   transformBefMapped[2] = odomAftMapped->twist.twist.angular.z;
@@ -240,3 +247,6 @@ int main(int argc, char** argv)
 
   return 0;
 }
+/*接收到来自里程计和地图的两个节点的频率是不同的，laser_odom为10HZ，aft_mapped为5HZ，
+有优化结果了就拿这一时刻的优化结果作为轨迹，没有优化结果只有里程计结果了，就直接拿里程计结果作为这一时刻的轨迹。
+最终TransformMaintenance的发布频率和laserOdometry的发布频率是一致的。*/
