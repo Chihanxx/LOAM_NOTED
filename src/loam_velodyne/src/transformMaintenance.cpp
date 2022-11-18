@@ -227,13 +227,13 @@ int main(int argc, char** argv)
   ros::init(argc, argv, "transformMaintenance");
   ros::NodeHandle nh;
 
-  ros::Subscriber subLaserOdometry = nh.subscribe<nav_msgs::Odometry> 
+  ros::Subscriber subLaserOdometry = nh.subscribe<nav_msgs::Odometry> // laserOdometry文件发布的/laser_odom_to_init消息 （Lidar里程计估计位姿到初始坐标系的变换）
                                      ("/laser_odom_to_init", 5, laserOdometryHandler);
 
-  ros::Subscriber subOdomAftMapped = nh.subscribe<nav_msgs::Odometry> 
+  ros::Subscriber subOdomAftMapped = nh.subscribe<nav_msgs::Odometry> // laserMapping文件发布的/aft_mapped_to_init消息（laserMapping节点优化后的位姿到初始坐标系的变换）
                                      ("/aft_mapped_to_init", 5, odomAftMappedHandler);
 
-  ros::Publisher pubLaserOdometry2 = nh.advertise<nav_msgs::Odometry> ("/integrated_to_init", 5);
+  ros::Publisher pubLaserOdometry2 = nh.advertise<nav_msgs::Odometry> ("/integrated_to_init", 5);//发布/integrated_to_init消息。
   pubLaserOdometry2Pointer = &pubLaserOdometry2;
   laserOdometry2.header.frame_id = "/camera_init";
   laserOdometry2.child_frame_id = "/camera";
